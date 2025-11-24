@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "transfer"
+version = "0.1.0"
+authors = [
+  { name="Dedy", email="dedy.ariansyah@gmail.com" },
+]
+description = "A modular PyTorch framework for fine-tuning Hugging Face models."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy>=1.21.6,<2.0",  # Add this constraint
+    "torch>=2.6.0",
+    "accelerate>=1.0.0",
+    "bitsandbytes>=0.44.0",
+    "transformers",
+    "datasets",
+    "tqdm",
+    "pyyaml",
+    "peft",
+]
+
+[project.urls]
+Homepage = "https://github.com/deduu/transfer"
+Issues = "https://github.com/deduu/transfer/issues"
+
+[project.scripts]
+transfer = "transfer.cli:main"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true

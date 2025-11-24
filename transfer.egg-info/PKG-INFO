@@ -1,0 +1,83 @@
+Metadata-Version: 2.4
+Name: transfer
+Version: 0.1.0
+Summary: A modular PyTorch framework for fine-tuning Hugging Face models.
+Home-page: https://github.com/deduu/transfer
+Author: Dedy Ariansyah
+Author-email: Dedy <dedy.ariansyah@gmail.com>
+Project-URL: Homepage, https://github.com/deduu/transfer
+Project-URL: Issues, https://github.com/deduu/transfer/issues
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: numpy<2.0,>=1.21.6
+Requires-Dist: torch>=2.6.0
+Requires-Dist: accelerate>=1.0.0
+Requires-Dist: bitsandbytes>=0.44.0
+Requires-Dist: transformers
+Requires-Dist: datasets
+Requires-Dist: tqdm
+Requires-Dist: pyyaml
+Requires-Dist: peft
+Dynamic: author
+Dynamic: home-page
+Dynamic: license-file
+Dynamic: requires-python
+
+# Transfer
+
+A modular and extensible PyTorch framework for fine-tuning Hugging Face models.
+
+Transfer simplifies the process of applying various fine-tuning techniques like Supervised Fine-Tuning (SFT) and Direct Preference Optimization (DPO) to any Hugging Face causal language model.
+
+## Installation
+
+You can install `transfer` directly from pip (once published) or from a local source.
+
+### From Source
+
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/yourusername/transfer.git
+    cd transfer
+    ```
+2.  Install the package:
+    ```bash
+    pip install .
+    ```
+
+## Quick Start
+
+Using `transfer` is designed to be simple and intuitive.
+
+### 1. Supervised Fine-Tuning (SFT)
+
+```python
+from datasets import load_dataset
+from transfer import Trainer, SFTConfig
+
+# 1. Load your data
+# For this example, we create a dummy dataset
+data = {
+    "prompt": ["What is the capital of France?", "Explain the theory of relativity."],
+    "response": ["The capital of France is Paris.", "The theory of relativity is..."]
+}
+dataset = Dataset.from_dict(data)
+
+# 2. Define your configuration
+config = SFTConfig(
+    model_name="google/gemma-2b",
+    num_epochs=3,
+    batch_size=2,
+    learning_rate=5e-5,
+    output_dir="./gemma-sft"
+)
+
+# 3. Create and run the trainer
+trainer = Trainer(task="sft", config=config)
+trainer.train(dataset)
+trainer.save_model()
+```
