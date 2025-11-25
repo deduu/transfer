@@ -1,3 +1,5 @@
+from transformers import TextStreamer
+import time
 import torch
 import json
 import gc
@@ -51,6 +53,10 @@ PROMPT_TO_TEST = [
     "Apakah kepo itu muncul secara genetik?"
 ]
 
+# Create a test dataset
+test_data = [{"prompt": prompt} for prompt in PROMPT_TO_TEST]
+test_dataset = Dataset.from_list(test_data)
+
 # Create a robust quantization configuration
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
@@ -76,7 +82,16 @@ def clear_gpu_memory():
             f"GPU memory reserved: {torch.cuda.memory_reserved(0) / 1024**3:.2f} GB")
 
 
-def run_inference(model_to_load, adapter_path=None, prompts=PROMPT_TO_TEST):
+def run_inference(
+    model_to_load,
+    adapter_path=None,
+    prompts=PROMPT_TO_TEST,
+    max_new_tokens=1024,
+    temperature=0.7,
+    top_p=0.9,
+    enable_thinking=False,
+    do_stream=True,
+):
     print(f"\n--- Loading model: {model_to_load} ---")
 
     tokenizer = AutoTokenizer.from_pretrained(model_to_load)
@@ -94,27 +109,75 @@ def run_inference(model_to_load, adapter_path=None, prompts=PROMPT_TO_TEST):
         model = PeftModel.from_pretrained(model, adapter_path)
 
     responses = []
+
+    # ========================================================
+    # LOOP THROUGH ALL PROMPTS GIVEN
+    # ========================================================
     for prompt_text in prompts:
+        print(f"\n========== PROMPT ==========\n{prompt_text}\n")
+
         messages = [{"role": "user", "content": prompt_text}]
-        prompt = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+        input_text = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=enable_thinking,
         )
 
-        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-        outputs = model.generate(
-            **inputs, max_new_tokens=1028, top_p=0.9, temperature=0.7)
+        model_inputs = tokenizer(
+            input_text, return_tensors="pt").to(model.device)
 
-        response = tokenizer.decode(
-            outputs[0][len(inputs.input_ids[0]):], skip_special_tokens=True
-        )
+        start_time = time.time()
 
-        responses.append({"prompt": prompt_text, "response": response})
+        with torch.no_grad():
+            if do_stream:
+                print("Streaming response:\n")
+                streamer = TextStreamer(tokenizer, skip_prompt=True)
+
+                _ = model.generate(
+                    **model_inputs,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    do_sample=(temperature > 0),
+                    streamer=streamer,
+                    pad_token_id=tokenizer.eos_token_id,
+                )
+
+                end_time = time.time()
+                print(
+                    f"\n[Streamed Answer Took {end_time - start_time:.2f} sec]")
+
+                responses.append(
+                    {"prompt": prompt_text, "response": "(streamed)"})
+                continue
+
+            else:
+                generated_ids = model.generate(
+                    **model_inputs,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    do_sample=(temperature > 0),
+                    pad_token_id=tokenizer.eos_token_id,
+                )
+
+                prompt_len = model_inputs.input_ids.shape[-1]
+                new_ids = generated_ids[0][prompt_len:]
+                text = tokenizer.decode(new_ids, skip_special_tokens=True)
+
+                end_time = time.time()
+                tps = len(new_ids) / (end_time - start_time)
+
+                print(
+                    f"[Answer Took {end_time - start_time:.2f} sec, TPS={tps:.2f}]")
+                print("\nRESPONSE:\n", text)
+
+                responses.append({"prompt": prompt_text, "response": text})
 
     # Cleanup
     del model
     del tokenizer
-    del inputs
-    del outputs
     clear_gpu_memory()
 
     return responses
@@ -123,49 +186,59 @@ def run_inference(model_to_load, adapter_path=None, prompts=PROMPT_TO_TEST):
 # --- 3. Run the "Before" and "After" Test ---
 config = SFTConfig(
     model_name=BASE_MODEL_NAME,
+    num_epochs=10,
     use_lora=True,
     lora_r=8,
     lora_alpha=16,
     lora_dropout=0.05,
     prompt_column="prompt",
     response_column="response",
-    output_dir="./llama-3.2-3b-it-kepo-lora"
+    output_dir="./llama-3.2-3b-it-kepo-lora",
+
+    enable_evaluation=True,
+    evaluation_dataset=test_dataset,
+    evaluation_metrics=["perplexity", "semantic_entropy", "token_entropy"],
+    evaluation_batch_size=2,
+    save_evaluation_results=True,
+    evaluation_results_path="./evaluation_results.json"
 )
 
 # === BEFORE FINE-TUNING ===
 # print("="*50)
 # print("       INFERENCE BEFORE FINE-TUNING")
 # print("="*50)
-# response_before = run_inference(model_to_load=BASE_MODEL_NAME)
+# response_before = run_inference(
+#     model_to_load=BASE_MODEL_NAME, prompts=PROMPT_TO_TEST, do_stream=True)
 # for r in response_before:
 #     print(f"Prompt: {r['prompt']}\nResponse: {r['response']}\n")
 
-# # Clear memory before training
-# clear_gpu_memory()
+# Clear memory before training
+clear_gpu_memory()
 
-# # === FINE-TUNING ===
-# print("\n" + "="*50)
-# print("         STARTING FINE-TUNING")
-# print("="*50)
-# print("Note: This may be slow on a 4GB GPU due to RAM-CPU offloading, but it will work.")
+# === FINE-TUNING ===
+print("\n" + "="*50)
+print("         STARTING FINE-TUNING")
+print("="*50)
+print("Note: This may be slow on a 4GB GPU due to RAM-CPU offloading, but it will work.")
 
-# trainer = Trainer(task="sft", config=config)
-# trainer.train(raw_dataset)
-# trainer.save_model()
-# print("Fine-tuning complete. Model saved to:", config.output_dir)
+trainer = Trainer(task="sft", config=config)
+trainer.train(raw_dataset)
+trainer.save_model()
+print("Fine-tuning complete. Model saved to:", config.output_dir)
 
-# # Clean up trainer
-# del trainer
-# clear_gpu_memory()
+# Clean up trainer
+del trainer
+clear_gpu_memory()
 
 # === AFTER FINE-TUNING ===
 print("\n" + "="*50)
 print("        INFERENCE AFTER FINE-TUNING")
 print("="*50)
 
-response_after = run_inference(BASE_MODEL_NAME, adapter_path=config.output_dir)
-for r in response_after:
-    print(f"Prompt: {r['prompt']}\nResponse: {r['response']}\n")
+response_after = run_inference(
+    BASE_MODEL_NAME, adapter_path=config.output_dir, prompts=PROMPT_TO_TEST, do_stream=True)
+# for r in response_after:
+#     print(f"Prompt: {r['prompt']}\nResponse: {r['response']}\n")
 
 # Final cleanup
 clear_gpu_memory()

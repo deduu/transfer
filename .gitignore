@@ -17,3 +17,8 @@ uv.lock
 *.egg
 build/
 dist/
+
+# Fine-tuned model directories
+*/sft_finetuned_model/
+*/dpo_finetuned_model/
+finetuned_model/

@@ -26,6 +26,7 @@ dependencies = [
     "tqdm",
     "pyyaml",
     "peft",
+    "sentence-transformers",
 ]
 
 [project.urls]

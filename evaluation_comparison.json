@@ -1,0 +1,40 @@
+{
+  "before": {
+    "perplexity": 8709.8037109375,
+    "semantic_entropy": 0.3336016155254586,
+    "semantic_entropy_std": 0.23589196462354986,
+    "avg_num_clusters": 1.6666666666666667
+  },
+  "after": {
+    "perplexity": 11286.99609375,
+    "semantic_entropy": 0.9276173340271816,
+    "semantic_entropy_std": 0.33994897724684275,
+    "avg_num_clusters": 3.0
+  },
+  "improvements": {
+    "perplexity": {
+      "before": 8709.8037109375,
+      "after": 11286.99609375,
+      "improvement_%": -29.58955756461127,
+      "direction": "\u2191"
+    },
+    "semantic_entropy": {
+      "before": 0.3336016155254586,
+      "after": 0.9276173340271816,
+      "improvement_%": -178.0614034395739,
+      "direction": "\u2191"
+    },
+    "semantic_entropy_std": {
+      "before": 0.23589196462354986,
+      "after": 0.33994897724684275,
+      "improvement_%": 44.11214802901537,
+      "direction": "\u2191"
+    },
+    "avg_num_clusters": {
+      "before": 1.6666666666666667,
+      "after": 3.0,
+      "improvement_%": 80.0,
+      "direction": "\u2191"
+    }
+  }
+}
