@@ -12,4 +12,8 @@ __pycache__/
 uv.lock
 
 
-
+# build artifacts
+*.egg-info/
+*.egg
+build/
+dist/

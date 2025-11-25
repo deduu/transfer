@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -34,6 +35,11 @@ class SFTConfig(BaseConfig):
     # You can also add a prompt template for more flexibility
     prompt_template: str = "### Prompt:\n{prompt}\n\n### Response:\n{response}{eos_token}"
 
+    def __post_init__(self):
+        # Automatically nest output directory inside BaseConfig.output_dir
+        self.output_dir = os.path.join(super().output_dir, self.output_dir)
+        os.makedirs(self.output_dir, exist_ok=True)
+
 
 @dataclass
 class DPOConfig(BaseConfig):
@@ -48,3 +54,8 @@ class DPOConfig(BaseConfig):
     # Add configurable column names
     chosen_column: str = "chosen"
     rejected_column: str = "rejected"
+
+    def __post_init__(self):
+        # Automatically nest output directory inside BaseConfig.output_dir
+        self.output_dir = os.path.join(super().output_dir, self.output_dir)
+        os.makedirs(self.output_dir, exist_ok=True)
