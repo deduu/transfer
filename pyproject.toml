@@ -27,6 +27,7 @@ dependencies = [
     "pyyaml",
     "peft",
     "sentence-transformers",
+    "hf-xet>=1.2.0",
 ]
 
 [project.urls]

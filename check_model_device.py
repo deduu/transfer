@@ -15,7 +15,7 @@ bnb_config = BitsAndBytesConfig(
 max_memory = {0: "4GB", "cpu": "30GiB"}
 
 print(f"--- Loading model: {BASE_MODEL_NAME} ---")
-
+tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_NAME)
 model = AutoModelForCausalLM.from_pretrained(
     BASE_MODEL_NAME,
     device_map="auto",
@@ -23,6 +23,31 @@ model = AutoModelForCausalLM.from_pretrained(
     max_memory=max_memory,
     dtype=torch.bfloat16,
 )
+
+print("\n--- Model and Tokenizer Configuration ---")
+print("Tokenizer model_max_length:", tokenizer.model_max_length)
+print("Model max_position_embeddings:", model.config.max_position_embeddings)
+text = "hello "   # very long sequence
+
+tok = tokenizer(
+    text,
+    truncation=True,
+    return_tensors="pt"
+)
+print(tokenizer.encode("hello ", add_special_tokens=False))
+print("Tokenized length:", tok.input_ids.shape[1])
+print("Tokenizer max_length used:", tokenizer.model_max_length)
+
+text = "hello " * 100000  # very long sequence
+
+tok = tokenizer(
+    text,
+    truncation=True,
+    return_tensors="pt"
+)
+
+print("Tokenized length:", tok.input_ids.shape[1])
+print("Tokenizer max_length used:", tokenizer.model_max_length)
 
 print("\n--- Model Device Placement Map ---")
 # This is the definitive map of where each layer is

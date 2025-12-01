@@ -1,0 +1,32 @@
+dataset_name: skk_dataset
+
+train: 
+  type: json
+  path: dataset/ksmi_train_topic_modelled.jsonl
+
+val: 
+  type: json
+  path: dataset/ksmi_val_topic_modelled.jsonl
+
+train_rl:
+  type: json
+  path: dataset/ksmi_train_rl_topic_modelled.jsonl
+
+val_rl: 
+  type: json
+  path: dataset/ksmi_val_rl_topic_modelled.jsonl
+
+test: 
+  type: json
+  path: dataset/ksmi_test_topic_modelled.jsonl
+
+data_sft:
+  input_field: [instruction, input]
+  target_field: output
+
+data_rl:
+  input_field: prompt
+  chosen_field: chosen
+  rejected_field: rejected
+
+prompt_template: "# Question:\n{query_text}\n\n# Note:\nIf the question contains technical terms use the RAG tools to get definitions first, DO NOT interpret the meaning by yourself! Then, create a plan to answer the user's question."
