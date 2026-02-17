@@ -33,9 +33,9 @@ class DPOStrategy(FinetuningStrategy):
 
             # Tokenize both
             chosen_tokens = self.tokenizer(
-                chosen_text, truncation=True, max_length=self.config['max_length'], padding=False)
+                chosen_text, truncation=True, max_length=self.config.max_length, padding=False)
             rejected_tokens = self.tokenizer(
-                rejected_text, truncation=True, max_length=self.config['max_length'], padding=False)
+                rejected_text, truncation=True, max_length=self.config.max_length, padding=False)
 
             return {
                 "chosen_input_ids": chosen_tokens["input_ids"],
@@ -113,6 +113,6 @@ class DPOStrategy(FinetuningStrategy):
         ref_logratios = ref_chosen_logps - ref_rejected_logps
 
         logits = pi_logratios - ref_logratios
-        loss = -F.logsigmoid(self.config['beta'] * logits).mean()
+        loss = -F.logsigmoid(self.config.beta * logits).mean()
 
         return loss

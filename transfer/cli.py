@@ -47,6 +47,16 @@ def train_command(args):
         train_dataset = dataset
         val_dataset = None
 
+    # Common training loop kwargs
+    loop_kwargs = dict(
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        warmup_steps=args.warmup_steps,
+        scheduler_type=args.scheduler_type,
+        max_grad_norm=args.max_grad_norm,
+        save_steps=args.save_steps,
+        logging_steps=args.logging_steps,
+    )
+
     # Create config based on task
     if args.task == 'sft':
         config = SFTConfig(
@@ -62,13 +72,10 @@ def train_command(args):
             prompt_column=args.prompt_column,
             response_column=args.response_column,
             max_length=args.max_length,
-            # Logging and checkpointing
-            logging_steps=args.logging_steps,
-            save_steps=args.save_steps,
-            eval_steps=args.eval_steps,
-            use_wandb=args.use_wandb,
-            wandb_project=args.wandb_project,
-            wandb_run_name=args.wandb_run_name,
+            messages_column=args.messages_column,
+            train_on_completions_only=args.train_on_completions_only,
+            system_prompt=args.system_prompt,
+            **loop_kwargs,
         )
     elif args.task == 'dpo':
         config = DPOConfig(
@@ -82,26 +89,24 @@ def train_command(args):
             lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
             beta=args.dpo_beta,
-            prompt_column=args.prompt_column,
             chosen_column=args.chosen_column,
             rejected_column=args.rejected_column,
             max_length=args.max_length,
-            # Logging and checkpointing
-            logging_steps=args.logging_steps,
-            save_steps=args.save_steps,
-            eval_steps=args.eval_steps,
-            use_wandb=args.use_wandb,
-            wandb_project=args.wandb_project,
-            wandb_run_name=args.wandb_run_name,
+            **loop_kwargs,
         )
     else:
         raise ValueError(f"Unknown task: {args.task}")
 
     # Create trainer
-    trainer = Trainer(task=args.task, config=config)
+    trainer = Trainer(
+        task=args.task,
+        config=config,
+        train_dataset=train_dataset,
+        eval_dataset=val_dataset,
+    )
 
     # Train
-    trainer.train(train_dataset, val_dataset=val_dataset)
+    trainer.train()
 
     # Save final model
     trainer.save_model()
@@ -259,25 +264,31 @@ def main():
     train_parser.add_argument('--lora_dropout', type=float, default=0.05,
                               help='LoRA dropout')
 
+    # Multi-turn / completion masking arguments (SFT)
+    train_parser.add_argument('--messages_column', type=str, default=None,
+                              help='Column name containing list of message dicts (multi-turn SFT)')
+    train_parser.add_argument('--train_on_completions_only', action='store_true',
+                              help='Only compute loss on assistant tokens')
+    train_parser.add_argument('--system_prompt', type=str, default=None,
+                              help='System prompt to prepend in single-turn mode')
+
+    # Training loop arguments
+    train_parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
+                              help='Number of gradient accumulation steps')
+    train_parser.add_argument('--warmup_steps', type=int, default=0,
+                              help='Number of warmup steps for LR scheduler')
+    train_parser.add_argument('--scheduler_type', type=str, default='cosine',
+                              help='LR scheduler type (cosine, linear, constant, etc.)')
+    train_parser.add_argument('--max_grad_norm', type=float, default=1.0,
+                              help='Max gradient norm for clipping (0.0 to disable)')
+    train_parser.add_argument('--save_steps', type=int, default=0,
+                              help='Save checkpoint every N global steps (0 to disable)')
+    train_parser.add_argument('--logging_steps', type=int, default=10,
+                              help='Log metrics every N global steps')
+
     # DPO-specific arguments
     train_parser.add_argument('--dpo_beta', type=float, default=0.1,
                               help='DPO beta parameter')
-
-    # Logging and checkpointing
-    train_parser.add_argument('--logging_steps', type=int, default=10,
-                              help='Log metrics every N steps')
-    train_parser.add_argument('--save_steps', type=int, default=100,
-                              help='Save checkpoint every N steps')
-    train_parser.add_argument('--eval_steps', type=int, default=100,
-                              help='Evaluate every N steps')
-
-    # Weights & Biases
-    train_parser.add_argument('--use_wandb', action='store_true',
-                              help='Use Weights & Biases for logging')
-    train_parser.add_argument('--wandb_project', type=str, default='transfer',
-                              help='W&B project name')
-    train_parser.add_argument('--wandb_run_name', type=str, default=None,
-                              help='W&B run name (auto-generated if not provided)')
 
     # ==================== INFERENCE COMMAND ====================
     infer_parser = subparsers.add_parser('infer', help='Run inference')

@@ -49,6 +49,14 @@ class BaseConfig:
     max_memory: Optional[dict] = None  # e.g., {0: "10GB", "cpu": "30GB"}
     device_map: str = "auto"  # "auto", "cuda:0", etc.
 
+    # Training loop improvements
+    gradient_accumulation_steps: int = 1    # 1 = no accumulation
+    warmup_steps: int = 0                   # 0 = no warmup
+    scheduler_type: str = "cosine"          # passed to get_scheduler()
+    max_grad_norm: float = 1.0              # 0.0 = disabled
+    save_steps: int = 0                     # 0 = no intermediate checkpoints
+    logging_steps: int = 10                 # log every N global steps
+
     def update_paths(self):
         # after output_dir finalized, update evaluation location
         self.evaluation_results_path = os.path.join(
@@ -63,6 +71,11 @@ class SFTConfig(BaseConfig):
     # Add configurable column names with sensible defaults
     prompt_column: str = "prompt"
     response_column: str = "response"
+
+    # Multi-turn conversation support
+    messages_column: Optional[str] = None          # column with list of message dicts
+    train_on_completions_only: bool = False         # only compute loss on assistant tokens
+    system_prompt: Optional[str] = None             # prepend system prompt in single-turn mode
 
     # You can also add a prompt template for more flexibility
     prompt_template: str = "### Prompt:\n{prompt}\n\n### Response:\n{response}{eos_token}"
@@ -79,6 +92,10 @@ class SFTConfig(BaseConfig):
         if self.quantization_compute_dtype not in ["bfloat16", "float16", "float32"]:
             raise ValueError(
                 "quantization_compute_dtype must be 'bfloat16', 'float16', or 'float32'")
+        if self.gradient_accumulation_steps < 1:
+            raise ValueError("gradient_accumulation_steps must be at least 1")
+        if self.max_grad_norm < 0:
+            raise ValueError("max_grad_norm must be non-negative")
 
         self.output_dir = os.path.join(super().output_dir, self.output_dir)
         os.makedirs(self.output_dir, exist_ok=True)
@@ -110,6 +127,10 @@ class DPOConfig(BaseConfig):
             raise ValueError("batch_size must be at least 1")
         if self.quantization_type not in ["nf4", "fp4"]:
             raise ValueError("quantization_type must be 'nf4' or 'fp4'")
+        if self.gradient_accumulation_steps < 1:
+            raise ValueError("gradient_accumulation_steps must be at least 1")
+        if self.max_grad_norm < 0:
+            raise ValueError("max_grad_norm must be non-negative")
 
         self.output_dir = os.path.join(super().output_dir, self.output_dir)
         os.makedirs(self.output_dir, exist_ok=True)

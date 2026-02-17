@@ -1,10 +1,13 @@
 import os
+import csv
+import math
 import torch
 import json
 import copy
 from tqdm import tqdm
 from typing import Dict, Any, Optional, Union
 from transformers import PreTrainedModel, PreTrainedTokenizerBase, AutoModelForCausalLM
+from transformers import get_scheduler
 from torch.utils.data import DataLoader
 from datasets import Dataset
 from peft import get_peft_model, LoraConfig, PeftModel
@@ -27,9 +30,27 @@ class Trainer:
         >>> trainer.train(dataset=my_dataset)
     """
 
-    def __init__(self, task: str, config: BaseConfig):
+    def __init__(self, task: str, config: BaseConfig, train_dataset: Optional[Dataset] = None, eval_dataset: Optional[Dataset] = None,
+                 evaluate_during_training: bool = False):
+        """
+        Docstring for __init__
+
+        :param self: Description
+        :param task: Description
+        :type task: str
+        :param config: Description
+        :type config: BaseConfig
+        :param train_dataset: Description
+        :param eval_dataset: Description
+        :type eval_dataset: Optional[Dataset]
+        :param evaluate_during_training: Description
+        :type evaluate_during_training: bool
+        """
         self.task = task.lower()
         self.config = config
+        self.train_dataset = train_dataset
+        self.eval_dataset = eval_dataset
+        self.evaluate_during_training = evaluate_during_training
 
         # --- Strategy Registry ---
         self._strategies = {
@@ -398,12 +419,57 @@ class Trainer:
 
         return results
 
-    def train(self, dataset: Dataset):
-        """Runs the fine-tuning process on the given dataset."""
+    def _save_checkpoint(self, global_step):
+        """Save model + tokenizer checkpoint to output_dir/checkpoint-{global_step}/."""
+        ckpt_dir = os.path.join(self.config.output_dir, f"checkpoint-{global_step}")
+        os.makedirs(ckpt_dir, exist_ok=True)
 
+        if self.config.use_lora:
+            self.model.save_pretrained(ckpt_dir)
+        else:
+            self.model.save_pretrained(ckpt_dir)
+        self.tokenizer.save_pretrained(ckpt_dir)
+        print(f"Checkpoint saved to {ckpt_dir}")
+
+    def _setup_logging(self):
+        """Initialize logging backends (CSV file, optional W&B)."""
+        self._csv_path = os.path.join(self.config.output_dir, "training_log.csv")
+        self._csv_file = open(self._csv_path, "w", newline="")
+        self._csv_writer = csv.writer(self._csv_file)
+        self._csv_writer.writerow(["step", "epoch", "loss", "learning_rate"])
+
+        # Optional W&B
+        self._wandb = None
+        try:
+            import wandb
+            if wandb.run is not None or os.environ.get("WANDB_DISABLED", "").lower() != "true":
+                self._wandb = wandb
+        except ImportError:
+            pass
+
+    def _log_step(self, global_step, epoch, loss, lr):
+        """Log a training step to CSV and optionally W&B."""
+        self._csv_writer.writerow([global_step, epoch, f"{loss:.6f}", f"{lr:.2e}"])
+        self._csv_file.flush()
+
+        if self._wandb and self._wandb.run is not None:
+            self._wandb.log({"train/loss": loss, "train/learning_rate": lr, "train/global_step": global_step})
+
+    def _teardown_logging(self):
+        """Close logging resources."""
+        if hasattr(self, "_csv_file") and self._csv_file:
+            self._csv_file.close()
+        print(f"Training log saved to {self._csv_path}")
+
+    def train(self):
+        """Runs the fine-tuning process with gradient accumulation, LR scheduling,
+        gradient clipping, checkpointing, and logging."""
+
+        self._setup_logging()
         try:
             # Preprocess data
-            processed_dataset = self.strategy.preprocess_data(dataset)
+            processed_dataset = self.strategy.preprocess_data(
+                self.train_dataset)
 
             # Create data loader
             dataloader = DataLoader(
@@ -413,47 +479,97 @@ class Trainer:
                 shuffle=True
             )
 
+            # Calculate total training steps for scheduler
+            accum_steps = self.config.gradient_accumulation_steps
+            steps_per_epoch = math.ceil(len(dataloader) / accum_steps)
+            total_steps = steps_per_epoch * self.config.num_epochs
+
+            # Create LR scheduler
+            scheduler = get_scheduler(
+                name=self.config.scheduler_type,
+                optimizer=self.optimizer,
+                num_warmup_steps=self.config.warmup_steps,
+                num_training_steps=total_steps,
+            )
+
             self.model.train()
+            global_step = 0
+
             for epoch in range(self.config.num_epochs):
                 epoch_loss = 0
+                micro_step = 0
                 progress_bar = tqdm(
                     dataloader, desc=f"Epoch {epoch+1}/{self.config.num_epochs}")
 
-                for batch in progress_bar:
+                for batch_idx, batch in enumerate(progress_bar):
                     try:
-                        self.optimizer.zero_grad()
                         loss = self.strategy.compute_loss(self.model, batch)
-                        loss.backward()
-                        self.optimizer.step()
+
+                        # Scale loss for gradient accumulation
+                        scaled_loss = loss / accum_steps
+                        scaled_loss.backward()
 
                         epoch_loss += loss.item()
-                        progress_bar.set_postfix(loss=loss.item())
+                        micro_step += 1
+
+                        # Optimizer step every accum_steps or at last batch
+                        is_last_batch = (batch_idx + 1) == len(dataloader)
+                        if micro_step % accum_steps == 0 or is_last_batch:
+                            # Gradient clipping
+                            if self.config.max_grad_norm > 0:
+                                torch.nn.utils.clip_grad_norm_(
+                                    self.model.parameters(),
+                                    self.config.max_grad_norm,
+                                )
+
+                            self.optimizer.step()
+                            scheduler.step()
+                            self.optimizer.zero_grad()
+                            global_step += 1
+
+                            current_lr = self.optimizer.param_groups[0]["lr"]
+
+                            # Logging
+                            if self.config.logging_steps > 0 and global_step % self.config.logging_steps == 0:
+                                self._log_step(global_step, epoch + 1, loss.item(), current_lr)
+
+                            # Checkpointing
+                            if self.config.save_steps > 0 and global_step % self.config.save_steps == 0:
+                                self._save_checkpoint(global_step)
+
+                            progress_bar.set_postfix(
+                                loss=f"{loss.item():.4f}",
+                                lr=f"{current_lr:.2e}",
+                                step=global_step,
+                            )
+                        else:
+                            progress_bar.set_postfix(loss=f"{loss.item():.4f}")
 
                     except torch.cuda.OutOfMemoryError as e:
                         print("\n" + "="*60)
-                        print("❌ OUT OF MEMORY ERROR DURING TRAINING")
+                        print("OUT OF MEMORY ERROR DURING TRAINING")
                         print("="*60)
                         print(f"Error at epoch {epoch+1}")
-                        print("\n💡 Solutions:")
+                        print("\nSolutions:")
                         print("   1. Reduce batch_size (currently: {})".format(
                             self.config.batch_size))
                         print("   2. Reduce max_length (currently: {})".format(
                             self.config.max_length))
-                        print("   3. Enable gradient accumulation")
+                        print("   3. Increase gradient_accumulation_steps")
                         print("   4. Enable quantization if disabled")
                         print("="*60 + "\n")
                         torch.cuda.empty_cache()
-                        raise  # Re-raise to stop training
+                        raise
 
                     except RuntimeError as e:
                         if "out of memory" in str(e).lower():
                             print(
-                                "\n❌ OUT OF MEMORY - Reduce batch_size or max_length")
+                                "\nOUT OF MEMORY - Reduce batch_size or max_length")
                             torch.cuda.empty_cache()
                             raise
                         else:
                             print(
-                                f"\n❌ Runtime error in training step: {str(e)}")
+                                f"\nRuntime error in training step: {str(e)}")
                             raise
 
                 avg_loss = epoch_loss / len(dataloader)
@@ -463,23 +579,24 @@ class Trainer:
                 # Optional: Run evaluation after each epoch
                 if self.config.enable_evaluation and hasattr(self.config, 'evaluate_during_training') and self.config.evaluate_during_training:
                     print(f"\nEvaluating after epoch {epoch+1}...")
-                    eval_results = self.evaluate_model()
+                    eval_results = self.evaluate_model(
+                        dataset=self.eval_dataset)
                     if eval_results:
                         print(f"Epoch {epoch+1} Evaluation: {eval_results}")
                     else:
                         print(
-                            f"⚠️  Evaluation skipped or failed for epoch {epoch+1}")
+                            f"Evaluation skipped or failed for epoch {epoch+1}")
 
         except KeyboardInterrupt:
             print("\n" + "="*60)
-            print("⚠️  Training interrupted by user")
-            print("💡 You can still save the model with trainer.save_model()")
+            print("Training interrupted by user")
+            print("You can still save the model with trainer.save_model()")
             print("="*60 + "\n")
             raise
 
         except Exception as e:
             print("\n" + "="*60)
-            print("❌ TRAINING FAILED")
+            print("TRAINING FAILED")
             print("="*60)
             print(f"Error type: {type(e).__name__}")
             print(f"Error message: {str(e)}")
@@ -487,6 +604,9 @@ class Trainer:
             traceback.print_exc()
             print("="*60 + "\n")
             raise
+
+        finally:
+            self._teardown_logging()
 
     def save_model(self):
         """Saves the fine-tuned model and tokenizer."""
