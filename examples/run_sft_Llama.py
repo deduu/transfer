@@ -41,6 +41,8 @@ data_strings = [
 ]
 
 parsed_data = [json.loads(s) for s in data_strings]
+
+print(parsed_data[0])
 raw_dataset = Dataset.from_list(parsed_data)
 raw_dataset = raw_dataset.rename_column("instruction", "prompt")
 
