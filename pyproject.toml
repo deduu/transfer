@@ -3,22 +3,21 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "transfer"
+name = "transfer-llm"
 version = "0.1.0"
 authors = [
   { name="Dedy", email="dedy.ariansyah@gmail.com" },
 ]
 description = "A modular PyTorch framework for fine-tuning Hugging Face models."
 readme = "README.md"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.11"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "numpy>=1.21.6,<2.0",  # Add this constraint
-    "torch>=2.6.0",
+    "numpy>=1.21.6",
     "accelerate>=1.0.0",
     "bitsandbytes>=0.44.0",
     "transformers",
@@ -27,8 +26,14 @@ dependencies = [
     "pyyaml",
     "peft",
     "sentence-transformers",
+    "scikit-learn",
+    "scipy",
     "hf-xet>=1.2.0",
+    "torch>=2.3.0",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
 
 [project.urls]
 Homepage = "https://github.com/deduu/transfer"
@@ -37,6 +42,12 @@ Issues = "https://github.com/deduu/transfer/issues"
 [project.scripts]
 transfer = "transfer.cli:main"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools]
+packages = ["transfer", "transfer.strategies"]
+
 [tool.uv.sources]
 torch = { index = "pytorch-cu124" }
 
@@ -44,3 +55,4 @@ torch = { index = "pytorch-cu124" }
 name = "pytorch-cu124"
 url = "https://download.pytorch.org/whl/cu124"
 explicit = true
+
